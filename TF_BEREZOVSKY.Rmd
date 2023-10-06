@@ -1,0 +1,297 @@
+---
+title: "TRABAJO FINAL Instrumentos de Análisis Urbanos II"
+author: "BEREZOVSKY Jimena"
+date: "2023-10-05"
+output: html_document
+---
+
+## MAPEO DE LA INSEGURIDAD EN CABA EN EL AÑO 2021 
+
+Este trabajo tendrá el objetivo de visualizar el total de delitos ocurridos en cada barrio de la ciudad de Buenos Aires en el año 2021 y obtener, además, los días de la semana en que mayor ocurren según el tipo registrado.
+
+#### 1. Se creó un repositorio en mi cuenta personal de GitHub con versión de control. 
+Esto sirve para poder conectar mi proyecto generado en R con el repositorio online.
+
+#### 2. Se instalaron las librerías necesarias
+
+```{r}
+library(tidyverse)
+library(sf)
+library(dplyr)
+library(readr)
+library(geoAr)
+library(ggmap)
+library(geofacet)
+library(leaflet)
+```
+
+#### 3. Se importó el Shape correspondiente a los Barrios de CABA.
+
+```{r}
+barrios_caba <- st_read("data/barrios_caba/barrios_caba.shp",
+                        stringsAsFactors = TRUE,
+                        options = "ENCODING=latin1")
+```
+
+#### 4. Se importó la base de datos correspondiente a los Delitos registrados en la Ciudad de Buenos Aires, obtenida de la pagina: https://data.buenosaires.gob.ar/dataset/delitos
+
+```{r}
+delitos <- read.csv2("data/delitos_2021.csv",
+                      stringsAsFactors = TRUE,
+                      encoding="latin1")
+```
+
+```{r}
+dim(delitos)
+```
+
+Este dataset cuenta con 87.390 registros y 11 columnas/variables. 
+Ellas son:
+
+```{r}
+names(delitos)
+```
+
+```{r}
+ summary(delitos)
+```
+
+Podemos observar que:
+El tipo de delito más registrado durante 2021 fue el Robo (con violencia). El barrio donde más delitos se registraron fue Palermo.
+
+#### 5.Ahora bien, queremos saber que días ocurrio esto con mayor frecuencia, por lo que trabajaremos con las fechas:
+
+```{r}
+ str(delitos$fecha)
+```
+
+Cambiaremos los registors a formato "fecha", para poder operar con esa columna:
+
+```{r}
+delitos<- delitos %>%
+  mutate(fecha=dmy(fecha))
+```
+
+```{r}
+ str(delitos$fecha)
+```
+
+Efectivamente, ahora el campo fecha dejó de ser factor y pasó a ser “Date” Ahora, agregamos 2 nuevas columnas a nuestro dataset donde indicamos el mes y el día de la semana en que ocurrió cada registro:
+
+```{r}
+delitos<- delitos %>%
+  mutate(mes=month(fecha, label = TRUE, abbr=FALSE, locale="es_ES.UTF-8"),
+         dia_semana=wday(fecha, label=TRUE, abbr=FALSE, locale="es_ES.UTF-8"))
+```
+
+```{r}
+ summary(delitos)
+```
+
+Podemos ver que el mes de 2021 en el que más delitos se registraron fue Diciembre y el día de la semana fue el Viernes. Veamos esto en un gráfico:
+
+```{r}
+ggplot(delitos) +
+    geom_bar(aes(x = mes))
+```
+
+#### 6.Ahora, analizaré mi dataset por día, para estudiar un poco más el fenómeno
+
+```{r}
+delitos_dia <- delitos %>%
+  group_by(fecha) %>%
+  summarise(cantidad=n())
+```
+
+```{r}
+ summary(delitos_dia)
+```
+Con este resultado, podemos observar que en promedio, durante 2021 ocurrieron 239 delitos por día.
+Esto se puede ver en el siguiente gráfico de líneas:
+
+```{r}
+ggplot(delitos_dia) +
+    geom_line(aes(x = fecha, y = cantidad))
+```
+Ahora, lo grafico en el mes que mayor delitos se registraron: Diciembre
+
+```{r}
+ggplot(delitos_dia %>%
+         filter(month(fecha)==12)) +
+    geom_line(aes(x = fecha, y = cantidad))+
+  geom_point(aes(x = fecha, y = cantidad))+
+    labs(title="EVOLUCIÓN DE DELITOS",
+       subtitle="Diciembre 2021, CABA",
+       caption="Elaboración propia en base a datos de BAData")+
+    theme_minimal()
+```
+#### 7.Ahora, agregare una variable más a este análisis, y sera la de "tipo de delitos" 
+
+```{r}
+ggplot(delitos %>%
+         group_by(fecha, tipo) %>%
+         summarise(cantidad=n())) +
+    geom_line(aes(x = fecha, y = cantidad, color=tipo, group=tipo))+
+  labs(title="DELITOS CABA",
+       subtitle="AÑO 2021",
+       caption="Elaboración propia en base a datos de BAData",
+       color="TIPO",
+       x="",
+       y="")+
+  scale_color_viridis_d(direction=-1)+
+  scale_x_date(date_breaks = "1 month")+
+  theme_minimal()+
+  theme(legend.position="top",
+        legend.justification = "left",
+        title=element_text(size=10, face = "bold"),
+        legend.title=element_text(size=10, face = "bold"),
+        axis.text.x = element_text(size = 6, angle = 90))
+```
+
+Tal como lo indicó el resumen del principio, está muy claro que el tipo/clase de delito que más se registró fue el Robo (con violencia).
+
+Cabe destacar que, este análisis está sumando la información de todos los meses del año 2021, pero es probable que cada mes tenga sus particularidades, por lo tanto, hice un gráfico separado por mes:
+
+```{r}
+ggplot(delitos)+
+  geom_bar(aes(x=dia_semana, fill=tipo))+
+  labs(title="Cantidad de delitos por día y tipo",
+       subtitle="CABA, Año 2021",
+       fill="Tipo",
+       x="Día",
+       y="Cantidad")+
+  facet_wrap(~mes)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(size = 6, angle = 90),
+        axis.text.y = element_text(size = 6))
+```
+
+#### 8. Análisis espacial
+
+Ya sabemos como ocurrieron los delitos en los dias y meses del año 2021, pero aún no tenemos claro como ocurrió en cada Barrio, por lo tanto, traemos el shape de barrios que tenemos en el proyecto y lo graficamos en el siguiente mapa interactivo:
+
+
+```{r}
+ggplot()+
+  geom_sf(data=barrios_caba, color="orange")+
+  geom_point(data=delitos, aes(x=longitud, y=latitud), size=0.5, alpha=0.4)
+```
+
+```{r}
+delitos_geo <- delitos %>%
+    st_as_sf(coords = c("longitud", "latitud"), crs = 4326)
+```
+
+```{r}
+ggplot()+
+  geom_sf(data=barrios_caba)+
+  geom_sf(data=delitos_geo, aes(color=tipo), alpha=0.3)+
+  labs(color="Delitos CABA")+
+  theme_minimal()
+```
+
+Como no todos los datos de nuestor dataset tenian completo el dato "barrio" hicimos un join, y a cada registro se le unió una columna del nombre del barrio con el que se solapa
+
+```{r}
+ggplot()+
+  geom_sf(data=barrios_caba)+
+  geom_sf(data=delitos_geo, aes(color=barrio), alpha=0.75, show.legend = FALSE)
+```
+Como el objetivo final es mapear los registros de delitos por barrio, haremos un conteo de delitos por barrio
+
+```{r}
+delitos_barrio <- delitos_geo %>%
+  group_by(barrio) %>%
+  summarise(cantidad=n())
+```
+
+```{r}
+delitos_barrio <- delitos_barrio %>%
+  st_drop_geometry()
+```
+
+Para poder unir ambos dataset, deben tener los campos escritos de la misma forma, por lo tanto, cambie todos los registros a mayuscula, y corregí los acentos que estaban mal escritos.
+
+```{r}
+delitos_barrio <- delitos_barrio %>%
+  mutate_all(toupper)
+```
+
+```{r}
+correct_tildes <- function(x) {
+  x <- gsub("Ã¡", "A", x)
+  x <- gsub("Ã©", "E", x)
+  x <- gsub("Ã", "I", x)
+  x <- gsub("I³", "O", x)
+  x <- gsub("Ãº", "U", x)
+  x <- gsub("I±", "Ñ", x)
+  return(x)
+}
+```
+
+```{r}
+delitos_barrio <- delitos_barrio %>%
+  mutate(barrio = correct_tildes(barrio))
+```
+
+Finalmente uni los datos.
+
+```{r}
+ barrios_caba <- left_join(barrios_caba, delitos_barrio, by="barrio")
+```
+
+
+Si bien ya sabemos que el barrio que mas delitos presentó en el 2021 fue Palermo, ahora graficaremos la densidad x km2, de delitos ocurridos en cada barrio 
+
+```{r}
+barrios_caba <- barrios_caba %>%
+  mutate(cantidad = as.numeric(cantidad),
+         sup_km2 = as.numeric(sup_km2))
+```
+
+
+```{r}
+ggplot()+
+  geom_sf(data=barrios_caba, aes(fill=cantidad/sup_km2), color="white")+
+    labs(title = "Delitos - Cantidad por km2",
+         subtitle = "Barrios de CABA",
+         fill = "Cantidad/km2",
+         caption= "Fuente: Datos Abiertos Gobierno de BsAs - 2021") +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  theme_minimal()
+```
+
+Por ultimo, y a modo de bonus track, si bien no era requerimiento del TF, quise probar el uso de "Leaflet" con un mapa interactivo:
+
+
+```{r}
+paleta <- colorNumeric(
+  palette = "YlOrRd",
+  domain = barrios_caba$sup_km2)
+
+labels <- sprintf(
+  "<strong>%s</strong><br/>delitos <br/>%g registros/km2",
+  barrios_caba$barrio, barrios_caba$sup_km2) %>% lapply(htmltools::HTML)
+
+leaflet(barrios_caba) %>%
+  addTiles() %>%
+addProviderTiles(providers$CartoDB) %>%
+addPolygons(color = "#444444",
+            weight = 1,
+            smoothFactor = 0.5,
+    fillOpacity = 0.65,
+    fillColor = ~colorNumeric("YlOrRd", barrios_caba$sup_km2)(sup_km2),
+    highlightOptions = highlightOptions(color = "white", weight = 2,
+      bringToFront = TRUE),
+     label = labels,
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "2px 5px"),
+    textsize = "10px",
+    direction = "top"))%>%
+addLegend("bottomright", pal=paleta, values = ~sup_km2,
+    title = "Delitos CABA 2021",
+    labFormat = labelFormat(suffix = " registros/km2"),
+    opacity = 0.65)
+```
+
+En resumen, el mapa se muestra coloreado por la cantidad de delitos registrados por kilómetro cuadrado en cada barrio. El mapa es interactivo y permite a los usuarios ver más información sobre cada barrio al hacer clic en él.
